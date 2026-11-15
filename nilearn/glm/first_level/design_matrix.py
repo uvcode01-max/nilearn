@@ -490,7 +490,7 @@ def check_design_matrix(
 
 
 def make_second_level_design_matrix(
-    subjects_label, confounds: pd.DataFrame | None = None
+    subjects_label, confounds: pd.DataFrame | np.ndarray | None = None
 ) -> pd.DataFrame:
     """Set up a second level design.
 
@@ -502,9 +502,11 @@ def make_second_level_design_matrix(
         Contain subject labels to extract confounders in the right order,
         corresponding with the images, to create the design matrix.
 
-    confounds : :class:`pandas.DataFrame` or ``None``, default=None
+    confounds : :class:`pandas.DataFrame`, :class:`numpy.ndarray` or None, \
+        default=None
         If given, contains at least two columns, ``subject_label`` and one
-        confound. The subjects list determines the rows to extract from
+        confound (or a 1D/2D numpy array aligned with ``subjects_label``).
+        The subjects list determines the rows to extract from
         confounds thanks to its ``subject_label`` column. All subjects must
         have confounds specified. There should be only one row per subject.
 
@@ -515,11 +517,29 @@ def make_second_level_design_matrix(
     """
     confounds_name = []
     if confounds is not None:
-        confounds_name = confounds.columns.tolist()
-        confounds_name.remove("subject_label")
+        if isinstance(confounds, np.ndarray):
+            if confounds.ndim == 1:
+                confounds = confounds[:, np.newaxis]
+            if len(subjects_label) != confounds.shape[0]:
+                raise ValueError(
+                    f"Number of rows in confounds ({confounds.shape[0]}) "
+                    f"does not match number of subjects "
+                    f"({len(subjects_label)})"
+                )
+            if np.isnan(confounds).any():
+                raise ValueError("Confounds contain NaN values.")
+            confounds_name = [
+                f"confound_{i}" for i in range(confounds.shape[1])
+            ]
+            confounds_df = pd.DataFrame(confounds, columns=confounds_name)
+            confounds_df["subject_label"] = subjects_label
+            confounds = confounds_df
+        else:
+            confounds_name = confounds.columns.tolist()
+            confounds_name.remove("subject_label")
 
-        if confounds.isna().to_numpy().any():
-            raise ValueError("Confounds contain NaN values.")
+            if confounds.isna().to_numpy().any():
+                raise ValueError("Confounds contain NaN values.")
 
     design_columns = [*confounds_name, "intercept"]
     # check column names are unique

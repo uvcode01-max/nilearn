@@ -309,8 +309,18 @@ def _check_input_as_surface_images(
 def _check_confounds(confounds) -> None:
     """Check confounds type."""
     if confounds is not None:
+        if isinstance(confounds, np.ndarray):
+            if confounds.ndim not in (1, 2):
+                raise ValueError(
+                    f"confounds array must be 1D or 2D, got {confounds.ndim}D."
+                )
+            if np.isnan(confounds).any():
+                raise ValueError("Confounds contain NaN values.")
+            return
         if not isinstance(confounds, pd.DataFrame):
-            raise TypeError("confounds must be a pandas DataFrame")
+            raise TypeError(
+                "confounds must be a pandas DataFrame or numpy array"
+            )
         if "subject_label" not in confounds.columns:
             raise ValueError(
                 "confounds DataFrame must contain column 'subject_label'"

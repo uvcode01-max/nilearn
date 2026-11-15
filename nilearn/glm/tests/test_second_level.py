@@ -350,10 +350,17 @@ def test_check_second_level_input_design_matrix(shape_3d_default):
 
 def test_check_confounds():
     _check_confounds(None)  # Should not do anything
+    _check_confounds(np.array([1, 2, 3]))
+    _check_confounds(np.array([[1, 2], [3, 4]]))
+
     with pytest.raises(
-        TypeError, match="confounds must be a pandas DataFrame"
+        TypeError, match="confounds must be a pandas DataFrame or numpy array"
     ):
         _check_confounds("foo")
+    with pytest.raises(ValueError, match="confounds array must be 1D or 2D"):
+        _check_confounds(np.ones((2, 2, 2)))
+    with pytest.raises(ValueError, match="Confounds contain NaN values"):
+        _check_confounds(np.array([1.0, np.nan]))
     with pytest.raises(
         ValueError, match="confounds DataFrame must contain column"
     ):
@@ -370,6 +377,66 @@ def test_check_confounds():
                 {"subject_label": [None, None, None], "conf": [4, 5, 6]}
             )
         )
+
+
+def test_make_second_level_design_matrix_array_confounds():
+    from nilearn.glm.first_level.design_matrix import (
+        make_second_level_design_matrix,
+    )
+
+    subjects = ["sub-01", "sub-02", "sub-03"]
+    # 1D array
+    desmat_1d = make_second_level_design_matrix(
+        subjects, np.array([10.0, 20.0, 30.0])
+    )
+    assert list(desmat_1d.columns) == ["confound_0", "intercept"]
+    assert np.allclose(desmat_1d["confound_0"].values, [10.0, 20.0, 30.0])
+    assert np.allclose(desmat_1d["intercept"].values, [1.0, 1.0, 1.0])
+
+    # 2D array
+    conf_2d = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    desmat_2d = make_second_level_design_matrix(subjects, conf_2d)
+    assert list(desmat_2d.columns) == [
+        "confound_0",
+        "confound_1",
+        "intercept",
+    ]
+    assert np.allclose(desmat_2d[["confound_0", "confound_1"]].values, conf_2d)
+
+    # Row mismatch
+    with pytest.raises(ValueError, match="Number of rows in confounds"):
+        make_second_level_design_matrix(subjects, np.array([1.0, 2.0]))
+
+    # NaN in array
+    with pytest.raises(ValueError, match="Confounds contain NaN values"):
+        make_second_level_design_matrix(subjects, np.array([1.0, np.nan, 3.0]))
+
+
+def test_second_level_fit_with_array_confounds(tmp_path, shape_4d_default):
+    from nilearn._utils.data_gen import write_fake_fmri_data_and_design
+
+    rk = 3
+    shapes = [SHAPE, (*SHAPE[:3], 10), (*shape_4d_default[:3], 15)]
+    mask_file, fmri_files, design_files = write_fake_fmri_data_and_design(
+        shapes, rk=rk, file_path=tmp_path
+    )
+    flm = FirstLevelModel(mask_img=mask_file).fit(
+        fmri_files[0], design_matrices=design_files[0]
+    )
+    flm.subject_label = "01"
+
+    flm2 = FirstLevelModel(mask_img=mask_file).fit(
+        fmri_files[0], design_matrices=design_files[0]
+    )
+    flm2.subject_label = "02"
+
+    flms = [flm, flm2]
+    confounds_arr = np.array([[10.0], [20.0]])
+    model = SecondLevelModel(mask_img=mask_file)
+    model.fit(flms, confounds=confounds_arr)
+    assert "confound_0" in model.design_matrix_.columns
+    assert "intercept" in model.design_matrix_.columns
+    assert np.allclose(model.design_matrix_["confound_0"].values, [10.0, 20.0])
 
 
 def test_check_first_level_contrast():
